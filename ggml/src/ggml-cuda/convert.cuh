@@ -7,7 +7,7 @@ using to_t_cuda_t = void (*)(const void * x, T * y, int64_t k, cudaStream_t stre
 
 typedef to_t_cuda_t<float> to_fp32_cuda_t;
 typedef to_t_cuda_t<half> to_fp16_cuda_t;
-typedef to_t_cuda_t<nv_bfloat16> to_bf16_cuda_t;
+typedef to_t_cuda_t<half> to_bf16_cuda_t;
 
 to_fp16_cuda_t ggml_get_to_fp16_cuda(ggml_type type);
 

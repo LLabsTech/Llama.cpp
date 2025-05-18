@@ -12,7 +12,7 @@ static __device__ void cpy_1_f32_f32(const char * cxi, char * cdsti) {
 
 static __device__ void cpy_1_f32_bf16(const char * cxi, char * cdsti) {
     const float * xi = (const float *) cxi;
-    nv_bfloat16 * dsti = (nv_bfloat16 *) cdsti;
+    half * dsti = (half *) cdsti;
 
     *dsti = *xi;
 }

@@ -69,13 +69,13 @@ static __global__ void mul_mat_vec(
             NO_DEVICE_CODE;
 #endif // FP16_AVAILABLE
         }
-    } else if constexpr (std::is_same<T, nv_bfloat16>::value) {
+    } else if constexpr (std::is_same<T, half>::value) {
         const int * x2 = (const int *) x;
         for (int64_t col2 = tid; col2 < ncols2; col2 += block_size) {
             const int    tmpx = x2[col2];
             const float2 tmpy = y2[col2];
-            sumf += float(reinterpret_cast<const nv_bfloat16 *>(&tmpx)[0]) * tmpy.x;
-            sumf += float(reinterpret_cast<const nv_bfloat16 *>(&tmpx)[1]) * tmpy.y;
+            sumf += float(reinterpret_cast<const half *>(&tmpx)[0]) * tmpy.x;
+            sumf += float(reinterpret_cast<const half *>(&tmpx)[1]) * tmpy.y;
         }
     } else {
         static_assert(std::is_same<T, void>::value, "unsupported type");
@@ -262,7 +262,7 @@ void ggml_cuda_mul_mat_vec(ggml_backend_cuda_context & ctx, const ggml_tensor * 
                 ne03,              ne3,           s03, s13,              s3,                 prec, ctx.stream());
         } break;
         case GGML_TYPE_BF16: {
-            const nv_bfloat16 * src0_d = (const nv_bfloat16 *) src0->data;
+            const half * src0_d = (const half *) src0->data;
             mul_mat_vec_cuda(src0_d, src1_d, ids_d, dst_d, ne00, ne01, s01,
                 ne02, nchannels_y, nchannels_dst, s02, stride_channel_y, stride_channel_dst,
                 ne03,              ne3,           s03, s13,              s3,                 prec, ctx.stream());
@@ -318,7 +318,7 @@ void ggml_cuda_op_mul_mat_vec(
                 nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, prec, stream);
         } break;
         case GGML_TYPE_BF16: {
-            const nv_bfloat16 * src0_d = (const nv_bfloat16 *) src0_dd_i;
+            const half * src0_d = (const half *) src0_dd_i;
             mul_mat_vec_cuda(src0_d, src1_ddf_i, nullptr, dst_dd_i, ne00, row_diff, stride_row,
                 nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y, stride_channel_dst,
                 nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, prec, stream);

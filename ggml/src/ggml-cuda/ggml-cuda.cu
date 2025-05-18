@@ -1201,7 +1201,7 @@ static void ggml_cuda_op_mul_mat_cublas(
     const bool use_fp16 = (src0->type == GGML_TYPE_F16 || ggml_is_quantized(src0->type)) && ggml_is_contiguous(src0) && row_diff == src0->ne[1] && dst->op_params[0] == GGML_PREC_DEFAULT;
 
     if (src0->type == GGML_TYPE_BF16 && ggml_is_contiguous(src0) && row_diff == src0->ne[1]) {
-        ggml_cuda_pool_alloc<nv_bfloat16> src1_as_bf16(ctx.pool(id));
+        ggml_cuda_pool_alloc<half> src1_as_bf16(ctx.pool(id));
         if (src1->type != GGML_TYPE_BF16) {
             const to_bf16_cuda_t to_bf16_cuda = ggml_get_to_bf16_cuda(src1->type);
             GGML_ASSERT(to_bf16_cuda != nullptr);
@@ -1209,9 +1209,9 @@ static void ggml_cuda_op_mul_mat_cublas(
             src1_as_bf16.alloc(ne);
             to_bf16_cuda(src1_ddf_i, src1_as_bf16.get(), ne, stream);
         }
-        const nv_bfloat16 * src1_ptr = src1->type == GGML_TYPE_BF16 ? (const nv_bfloat16 *) src1_ddf_i : src1_as_bf16.get();
-        const nv_bfloat16 * src0_ptr = (const nv_bfloat16 *)src0_dd_i;
-        ggml_cuda_pool_alloc<nv_bfloat16> dst_bf16(ctx.pool(id), row_diff*src1_ncols);
+        const half * src1_ptr = src1->type == GGML_TYPE_BF16 ? (const half *) src1_ddf_i : src1_as_bf16.get();
+        const half * src0_ptr = (const half *)src0_dd_i;
+        ggml_cuda_pool_alloc<half> dst_bf16(ctx.pool(id), row_diff*src1_ncols);
 
         const float alpha_f32 = 1.0f;
         const float beta_f32  = 0.0f;
@@ -1220,9 +1220,9 @@ static void ggml_cuda_op_mul_mat_cublas(
         CUBLAS_CHECK(
             cublasGemmEx(ctx.cublas_handle(id), CUBLAS_OP_T, CUBLAS_OP_N,
                     row_diff, src1_ncols, ne10,
-                    &alpha_f32,  src0_ptr,       CUDA_R_16BF, ne00,
-                                 src1_ptr,       CUDA_R_16BF, ne10,
-                    &beta_f32,   dst_bf16.get(), CUDA_R_16BF, ldc,
+                    &alpha_f32,  src0_ptr,       CUDA_R_16F, ne00,
+                                 src1_ptr,       CUDA_R_16F, ne10,
+                    &beta_f32,   dst_bf16.get(), CUDA_R_16F, ldc,
                     CUBLAS_COMPUTE_32F,
                     CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 
