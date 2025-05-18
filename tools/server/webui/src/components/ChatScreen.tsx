@@ -279,7 +279,11 @@ export default function ChatScreen() {
 function ServerInfo() {
   const { serverProps } = useAppContext();
   return (
-    <div className="card card-sm shadow-sm border-1 border-base-content/20 text-base-content/70 mb-6">
+    <div
+      className="card card-sm shadow-sm border-1 border-base-content/20 text-base-content/70 mb-6"
+      tabIndex={0}
+      aria-description="Server information"
+    >
       <div className="card-body">
         <b>Server Info</b>
         <p>
@@ -306,10 +310,13 @@ function ChatInput({
   onStop: () => void;
   isGenerating: boolean;
 }) {
+  const { config } = useAppContext();
   const [isDrag, setIsDrag] = useState(false);
 
   return (
     <div
+      role="group"
+      aria-label="Chat input"
       className={classNames({
         'flex items-end pt-8 pb-6 sticky bottom-0 bg-base-100': true,
         'opacity-50': isDrag, // simply visual feedback to inform user that the file will be accepted
@@ -328,7 +335,28 @@ function ChatInput({
         {({ getRootProps, getInputProps }) => (
           <div
             className="flex flex-col rounded-xl border-1 border-base-content/30 p-3 w-full"
+            // when a file is pasted to the input, we handle it here
+            // if a text is pasted, and if it is long text, we will convert it to a file
             onPasteCapture={(e: ClipboardEvent<HTMLInputElement>) => {
+              const text = e.clipboardData.getData('text/plain');
+              if (
+                text.length > 0 &&
+                config.pasteLongTextToFileLen > 0 &&
+                text.length > config.pasteLongTextToFileLen
+              ) {
+                // if the text is too long, we will convert it to a file
+                extraContext.addItems([
+                  {
+                    type: 'context',
+                    name: 'Pasted Content',
+                    content: text,
+                  },
+                ]);
+                e.preventDefault();
+                return;
+              }
+
+              // if a file is pasted, we will handle it here
               const files = Array.from(e.clipboardData.items)
                 .filter((item) => item.kind === 'file')
                 .map((item) => item.getAsFile())
@@ -378,13 +406,15 @@ function ChatInput({
                     'btn w-8 h-8 p-0 rounded-full': true,
                     'btn-disabled': isGenerating,
                   })}
+                  aria-label="Upload file"
+                  tabIndex={0}
+                  role="button"
                 >
                   <PaperClipIcon className="h-5 w-5" />
                 </label>
                 <input
                   id="file-upload"
                   type="file"
-                  className="hidden"
                   disabled={isGenerating}
                   {...getInputProps()}
                   hidden
@@ -400,6 +430,7 @@ function ChatInput({
                   <button
                     className="btn btn-primary w-8 h-8 p-0 rounded-full"
                     onClick={onSend}
+                    aria-label="Send message"
                   >
                     <ArrowUpIcon className="h-5 w-5" />
                   </button>
