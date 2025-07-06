@@ -290,7 +290,7 @@ void mul_mat_vec_cuda<float>(
          stride_channel_dst, nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, stream);
 }
 
-// Specialization for half - can use either half or float accumulation
+// Specialization for half - always use float accumulation on older GPUs
 template<>
 void mul_mat_vec_cuda<half>(
         const half * x, const float * y, const int32_t * ids, float * dst,
@@ -300,17 +300,11 @@ void mul_mat_vec_cuda<half>(
         const int64_t stride_channel_x, const int64_t stride_channel_y, const int64_t stride_channel_dst, const int64_t nsamples_x,
         const int64_t nsamples_dst, const int64_t stride_sample_x, const int64_t stride_sample_y, const int64_t stride_sample_dst,
         enum ggml_prec prec, cudaStream_t stream) {
-    if (prec == GGML_PREC_DEFAULT) {
-        mul_mat_vec_cuda_switch_ncols_dst<half, half>
-            (x, y, ids, dst, ncols, nrows, ncols_dst, stride_row, stride_col_y, stride_col_dst,
-             nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y,
-             stride_channel_dst, nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, stream);
-    } else {
-        mul_mat_vec_cuda_switch_ncols_dst<half, float>
-            (x, y, ids, dst, ncols, nrows, ncols_dst, stride_row, stride_col_y, stride_col_dst,
-             nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y,
-             stride_channel_dst, nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, stream);
-    }
+    // Always use float accumulation since Jetson Nano doesn't support FP16 compute
+    mul_mat_vec_cuda_switch_ncols_dst<half, float>
+        (x, y, ids, dst, ncols, nrows, ncols_dst, stride_row, stride_col_y, stride_col_dst,
+         nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y,
+         stride_channel_dst, nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, stream);
 }
 
 void ggml_cuda_mul_mat_vec(ggml_backend_cuda_context & ctx, const ggml_tensor * src0, const ggml_tensor * src1, const ggml_tensor * ids, ggml_tensor * dst) {
