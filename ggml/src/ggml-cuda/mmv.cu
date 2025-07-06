@@ -50,7 +50,7 @@ static __global__ void mul_mat_vec(
                 sumf[j] += tmpx.y*tmpy.y;
             }
         }
-    } else if constexpr (std::is_same<T, half>::value) {
+    } else if (std::is_same<T, half>::value) {
         const half2 * x2 = (const half2 *) x;
 
         if (std::is_same<type_acc, float>::value) {
@@ -86,7 +86,7 @@ static __global__ void mul_mat_vec(
             NO_DEVICE_CODE;
 #endif // FP16_AVAILABLE
         }
-    } else if constexpr (std::is_same<T, half>::value) {
+    } else if (std::is_same<T, half>::value) {
         const int * x2 = (const int *) x;
         for (int col2 = tid; col2 < ncols2; col2 += block_size) {
             const int tmpx = x2[col2];
@@ -292,14 +292,13 @@ static void mul_mat_vec_cuda(
         const int64_t stride_channel_x, const int64_t stride_channel_y, const int64_t stride_channel_dst, const int64_t nsamples_x,
         const int64_t nsamples_dst, const int64_t stride_sample_x, const int64_t stride_sample_y, const int64_t stride_sample_dst,
         enum ggml_prec prec, cudaStream_t stream) {
-    if (std::is_same<T, half>::value) {
-        if (prec == GGML_PREC_DEFAULT) {
-            mul_mat_vec_cuda_switch_ncols_dst<T, half>
-                (x, y, ids, dst, ncols, nrows, ncols_dst, stride_row, stride_col_y, stride_col_dst,
-                 nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y,
-                 stride_channel_dst, nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, stream);
-            return;
-        }
+    // Only use half precision accumulation for half input type
+    if (std::is_same<T, half>::value && prec == GGML_PREC_DEFAULT) {
+        mul_mat_vec_cuda_switch_ncols_dst<T, half>
+            (x, y, ids, dst, ncols, nrows, ncols_dst, stride_row, stride_col_y, stride_col_dst,
+             nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y,
+             stride_channel_dst, nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, stream);
+        return;
     }
     mul_mat_vec_cuda_switch_ncols_dst<T, float>
         (x, y, ids, dst, ncols, nrows, ncols_dst, stride_row, stride_col_y, stride_col_dst,
