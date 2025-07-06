@@ -1233,7 +1233,7 @@ static void ggml_cuda_op_mul_mat_cublas(
     const bool use_fp16 = (src0->type == GGML_TYPE_F16 || ggml_is_quantized(src0->type)) && ggml_is_contiguous(src0) && row_diff == src0->ne[1] && dst->op_params[0] == GGML_PREC_DEFAULT;
 
     if (supports_bf16 && src0->type == GGML_TYPE_BF16 && ggml_is_contiguous(src0) && row_diff == src0->ne[1]) {
-        ggml_cuda_pool_alloc<nv_bfloat16> src1_as_bf16(ctx.pool(id));
+        ggml_cuda_pool_alloc<half> src1_as_bf16(ctx.pool(id));
         if (src1->type != GGML_TYPE_BF16) {
             const to_bf16_cuda_t to_bf16_cuda = ggml_get_to_bf16_cuda(src1->type);
             GGML_ASSERT(to_bf16_cuda != nullptr);
@@ -1791,7 +1791,7 @@ struct batched_mul_mat_traits<GGML_TYPE_F32> {
 
 template<>
 struct batched_mul_mat_traits<GGML_TYPE_BF16> {
-    using cuda_type = nv_bfloat16;
+    using cuda_type = half;
     static inline const cublasComputeType_t compute_type = CUBLAS_COMPUTE_32F;
     static inline const cudaDataType_t data_type = CUDA_R_16BF;
     static inline const ggml_type ggml_type_val = GGML_TYPE_BF16;
@@ -1884,7 +1884,7 @@ static void ggml_cuda_mul_mat_batched_cublas_impl(ggml_backend_cuda_context & ct
     const float beta_f32 = 0.0f;
 
     if (dst->op_params[0] == GGML_PREC_DEFAULT) {
-        if constexpr (src0_type == GGML_TYPE_F32) {
+        if (src0_type == GGML_TYPE_F32) {
             dst_t = (char *) dst_ddf;  // Direct F32 output
         } else {
             dst_t = (char *) dst_temp.alloc(ne_dst);
