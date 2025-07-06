@@ -65,36 +65,17 @@ static __global__ void mul_mat_vec(
                 }
             }
         } else {
-#ifdef FP16_AVAILABLE
-            half2 sumh2[ncols_dst] = {{0.0f, 0.0f}};
-
+            // Half precision accumulation is not supported on this architecture
+            // Fall back to float accumulation
             for (int col2 = tid; col2 < ncols2; col2 += block_size) {
-                const half2 tmpx = x2[col2];
+                const float2 tmpx = __half22float2(x2[col2]);
 
 #pragma unroll
                 for (int j = 0; j < ncols_dst; ++j) {
                     const float2 tmpy = y2[j*stride_col_y2 + col2];
-                    sumh2[j] += tmpx * make_half2(tmpy.x, tmpy.y);
+                    sumf[j] += tmpx.x * tmpy.x;
+                    sumf[j] += tmpx.y * tmpy.y;
                 }
-            }
-
-#pragma unroll
-            for (int j = 0; j < ncols_dst; ++j) {
-                sumf[j] = __low2float(sumh2[j]) + __high2float(sumh2[j]);
-            }
-#else
-            NO_DEVICE_CODE;
-#endif // FP16_AVAILABLE
-        }
-    } else if (std::is_same<T, half>::value) {
-        const int * x2 = (const int *) x;
-        for (int col2 = tid; col2 < ncols2; col2 += block_size) {
-            const int tmpx = x2[col2];
-#pragma unroll
-            for (int j = 0; j < ncols_dst; ++j) {
-                const float2 tmpy = y2[j*stride_col_y2 + col2];
-                sumf[j] += float(reinterpret_cast<const half *>(&tmpx)[0]) * tmpy.x;
-                sumf[j] += float(reinterpret_cast<const half *>(&tmpx)[1]) * tmpy.y;
             }
         }
     } else {
