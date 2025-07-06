@@ -37,7 +37,7 @@ static __global__ void mul_mat_vec(
 
     float sumf[ncols_dst] = {0.0f};
 
-    if constexpr (std::is_same<T, float>::value) {
+    if (std::is_same<T, float>::value) {
         const float2 * x2 = (const float2 *) x;
 
         for (int col2 = tid; col2 < ncols2; col2 += block_size) {
