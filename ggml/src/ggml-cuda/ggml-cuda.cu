@@ -1779,41 +1779,57 @@ struct batched_mul_mat_traits;
 template<>
 struct batched_mul_mat_traits<GGML_TYPE_F32> {
     using cuda_type = float;
-    static inline const cublasComputeType_t compute_type = CUBLAS_COMPUTE_32F;
-    static inline const cudaDataType_t data_type = CUDA_R_32F;
-    static inline const ggml_type ggml_type_val = GGML_TYPE_F32;
-    static inline const float alpha = 1.0f;
-    static inline const float beta = 0.0f;
-    static inline const void* get_alpha() { static const float val = alpha; return &val; }
-    static inline const void* get_beta() { static const float val = beta; return &val; }
-    static inline auto get_nc_converter(ggml_type src_type) { return ggml_get_to_fp32_nc_cuda(src_type); }
+    static const cublasComputeType_t compute_type = CUBLAS_COMPUTE_32F;
+    static const cudaDataType_t data_type = CUDA_R_32F;
+    static const ggml_type ggml_type_val = GGML_TYPE_F32;
+    static const float alpha;
+    static const float beta;
+    static const void* get_alpha() { return &alpha; }
+    static const void* get_beta() { return &beta; }
+    static auto get_nc_converter(ggml_type src_type) { return ggml_get_to_fp32_nc_cuda(src_type); }
 };
+
+// Static member definitions
+const float batched_mul_mat_traits<GGML_TYPE_F32>::alpha = 1.0f;
+const float batched_mul_mat_traits<GGML_TYPE_F32>::beta = 0.0f;
 
 template<>
 struct batched_mul_mat_traits<GGML_TYPE_BF16> {
     using cuda_type = half;
-    static inline const cublasComputeType_t compute_type = CUBLAS_COMPUTE_32F;
-    static inline const cudaDataType_t data_type = CUDA_R_16BF;
-    static inline const ggml_type ggml_type_val = GGML_TYPE_BF16;
-    static inline const float alpha = 1.0f;
-    static inline const float beta = 0.0f;
-    static inline const void* get_alpha() { static const float val = alpha; return &val; }
-    static inline const void* get_beta() { static const float val = beta; return &val; }
-    static inline auto get_nc_converter(ggml_type src_type) { return ggml_get_to_bf16_nc_cuda(src_type); }
+    static const cublasComputeType_t compute_type = CUBLAS_COMPUTE_32F;
+#if defined(CUDA_R_16BF)
+    static const cudaDataType_t data_type = CUDA_R_16BF;
+#else
+    static const cudaDataType_t data_type = CUDA_R_16F;  // Fallback for older CUDA
+#endif
+    static const ggml_type ggml_type_val = GGML_TYPE_BF16;
+    static const float alpha;
+    static const float beta;
+    static const void* get_alpha() { return &alpha; }
+    static const void* get_beta() { return &beta; }
+    static auto get_nc_converter(ggml_type src_type) { return ggml_get_to_bf16_nc_cuda(src_type); }
 };
+
+// Static member definitions
+const float batched_mul_mat_traits<GGML_TYPE_BF16>::alpha = 1.0f;
+const float batched_mul_mat_traits<GGML_TYPE_BF16>::beta = 0.0f;
 
 template<>
 struct batched_mul_mat_traits<GGML_TYPE_F16> {
     using cuda_type = half;
-    static inline const cublasComputeType_t compute_type = CUBLAS_COMPUTE_16F;
-    static inline const cudaDataType_t data_type = CUDA_R_16F;
-    static inline const ggml_type ggml_type_val = GGML_TYPE_F16;
-    static inline const half alpha = 1.0;
-    static inline const half beta = 0.0;
-    static inline const void* get_alpha() { static const half val = alpha; return &val; }
-    static inline const void* get_beta() { static const half val = beta; return &val; }
-    static inline auto get_nc_converter(ggml_type src_type) { return ggml_get_to_fp16_nc_cuda(src_type); }
+    static const cublasComputeType_t compute_type = CUBLAS_COMPUTE_16F;
+    static const cudaDataType_t data_type = CUDA_R_16F;
+    static const ggml_type ggml_type_val = GGML_TYPE_F16;
+    static const half alpha;
+    static const half beta;
+    static const void* get_alpha() { return &alpha; }
+    static const void* get_beta() { return &beta; }
+    static auto get_nc_converter(ggml_type src_type) { return ggml_get_to_fp16_nc_cuda(src_type); }
 };
+
+// Static member definitions
+const half batched_mul_mat_traits<GGML_TYPE_F16>::alpha = 1.0;
+const half batched_mul_mat_traits<GGML_TYPE_F16>::beta = 0.0;
 
 template<ggml_type src0_type>
 static void ggml_cuda_mul_mat_batched_cublas_impl(ggml_backend_cuda_context & ctx, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
