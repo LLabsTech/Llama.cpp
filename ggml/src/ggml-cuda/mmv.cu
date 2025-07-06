@@ -291,19 +291,45 @@ static void mul_mat_vec_cuda(
         const int64_t nchannels_x, const int64_t nchannels_y, const int64_t nchannels_dst,
         const int64_t stride_channel_x, const int64_t stride_channel_y, const int64_t stride_channel_dst, const int64_t nsamples_x,
         const int64_t nsamples_dst, const int64_t stride_sample_x, const int64_t stride_sample_y, const int64_t stride_sample_dst,
+        enum ggml_prec prec, cudaStream_t stream);
+
+// Specialization for float - always use float accumulation
+template<>
+void mul_mat_vec_cuda<float>(
+        const float * x, const float * y, const int32_t * ids, float * dst,
+        const int64_t ncols, const int64_t nrows, const int64_t ncols_dst,
+        const int64_t stride_row, const int64_t stride_col_y, const int stride_col_dst,
+        const int64_t nchannels_x, const int64_t nchannels_y, const int64_t nchannels_dst,
+        const int64_t stride_channel_x, const int64_t stride_channel_y, const int64_t stride_channel_dst, const int64_t nsamples_x,
+        const int64_t nsamples_dst, const int64_t stride_sample_x, const int64_t stride_sample_y, const int64_t stride_sample_dst,
         enum ggml_prec prec, cudaStream_t stream) {
-    // Only use half precision accumulation for half input type
-    if (std::is_same<T, half>::value && prec == GGML_PREC_DEFAULT) {
-        mul_mat_vec_cuda_switch_ncols_dst<T, half>
-            (x, y, ids, dst, ncols, nrows, ncols_dst, stride_row, stride_col_y, stride_col_dst,
-             nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y,
-             stride_channel_dst, nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, stream);
-        return;
-    }
-    mul_mat_vec_cuda_switch_ncols_dst<T, float>
+    mul_mat_vec_cuda_switch_ncols_dst<float, float>
         (x, y, ids, dst, ncols, nrows, ncols_dst, stride_row, stride_col_y, stride_col_dst,
          nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y,
          stride_channel_dst, nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, stream);
+}
+
+// Specialization for half - can use either half or float accumulation
+template<>
+void mul_mat_vec_cuda<half>(
+        const half * x, const float * y, const int32_t * ids, float * dst,
+        const int64_t ncols, const int64_t nrows, const int64_t ncols_dst,
+        const int64_t stride_row, const int64_t stride_col_y, const int stride_col_dst,
+        const int64_t nchannels_x, const int64_t nchannels_y, const int64_t nchannels_dst,
+        const int64_t stride_channel_x, const int64_t stride_channel_y, const int64_t stride_channel_dst, const int64_t nsamples_x,
+        const int64_t nsamples_dst, const int64_t stride_sample_x, const int64_t stride_sample_y, const int64_t stride_sample_dst,
+        enum ggml_prec prec, cudaStream_t stream) {
+    if (prec == GGML_PREC_DEFAULT) {
+        mul_mat_vec_cuda_switch_ncols_dst<half, half>
+            (x, y, ids, dst, ncols, nrows, ncols_dst, stride_row, stride_col_y, stride_col_dst,
+             nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y,
+             stride_channel_dst, nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, stream);
+    } else {
+        mul_mat_vec_cuda_switch_ncols_dst<half, float>
+            (x, y, ids, dst, ncols, nrows, ncols_dst, stride_row, stride_col_y, stride_col_dst,
+             nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y,
+             stride_channel_dst, nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, stream);
+    }
 }
 
 void ggml_cuda_mul_mat_vec(ggml_backend_cuda_context & ctx, const ggml_tensor * src0, const ggml_tensor * src1, const ggml_tensor * ids, ggml_tensor * dst) {
