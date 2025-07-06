@@ -24,7 +24,7 @@ using to_t_nc_cuda_t = void (*)(const void * x, T * y,
 
 typedef to_t_nc_cuda_t<float> to_fp32_nc_cuda_t;
 typedef to_t_nc_cuda_t<half> to_fp16_nc_cuda_t;
-typedef to_t_nc_cuda_t<nv_bfloat16> to_bf16_nc_cuda_t;
+typedef to_t_nc_cuda_t<half> to_bf16_nc_cuda_t;
 
 to_fp32_nc_cuda_t ggml_get_to_fp32_nc_cuda(ggml_type type);
 to_fp16_nc_cuda_t ggml_get_to_fp16_nc_cuda(ggml_type type);
