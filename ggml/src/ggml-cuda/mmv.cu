@@ -37,7 +37,7 @@ static __global__ void mul_mat_vec(
 
     float sumf[ncols_dst] = {0.0f};
 
-    if (std::is_same<T, float>::value) {
+    if constexpr (std::is_same<T, float>::value) {
         const float2 * x2 = (const float2 *) x;
 
         for (int col2 = tid; col2 < ncols2; col2 += block_size) {
@@ -50,7 +50,7 @@ static __global__ void mul_mat_vec(
                 sumf[j] += tmpx.y*tmpy.y;
             }
         }
-    } else if (std::is_same<T, half>::value) {
+    } else if constexpr (std::is_same<T, half>::value) {
         const half2 * x2 = (const half2 *) x;
 
         if (std::is_same<type_acc, float>::value) {
@@ -65,23 +65,40 @@ static __global__ void mul_mat_vec(
                 }
             }
         } else {
-            // Half precision accumulation is not supported on this architecture
-            // Fall back to float accumulation
+#ifdef FP16_AVAILABLE
+            half2 sumh2[ncols_dst] = {{0.0f, 0.0f}};
+
             for (int col2 = tid; col2 < ncols2; col2 += block_size) {
-                const float2 tmpx = __half22float2(x2[col2]);
+                const half2 tmpx = x2[col2];
 
 #pragma unroll
                 for (int j = 0; j < ncols_dst; ++j) {
                     const float2 tmpy = y2[j*stride_col_y2 + col2];
-                    sumf[j] += tmpx.x * tmpy.x;
-                    sumf[j] += tmpx.y * tmpy.y;
+                    sumh2[j] += tmpx * make_half2(tmpy.x, tmpy.y);
                 }
+            }
+
+#pragma unroll
+            for (int j = 0; j < ncols_dst; ++j) {
+                sumf[j] = __low2float(sumh2[j]) + __high2float(sumh2[j]);
+            }
+#else
+            NO_DEVICE_CODE;
+#endif // FP16_AVAILABLE
+        }
+    } else if constexpr (std::is_same<T, nv_bfloat16>::value) {
+        const int * x2 = (const int *) x;
+        for (int col2 = tid; col2 < ncols2; col2 += block_size) {
+            const int tmpx = x2[col2];
+#pragma unroll
+            for (int j = 0; j < ncols_dst; ++j) {
+                const float2 tmpy = y2[j*stride_col_y2 + col2];
+                sumf[j] += float(reinterpret_cast<const nv_bfloat16 *>(&tmpx)[0]) * tmpy.x;
+                sumf[j] += float(reinterpret_cast<const nv_bfloat16 *>(&tmpx)[1]) * tmpy.y;
             }
         }
     } else {
-        // This should never be reached with current template instantiations
-        // Allow the compilation to proceed, but the code path is unreachable
-        return;
+        static_assert(std::is_same<T, void>::value, "unsupported type");
     }
 
 #pragma unroll
@@ -274,36 +291,17 @@ static void mul_mat_vec_cuda(
         const int64_t nchannels_x, const int64_t nchannels_y, const int64_t nchannels_dst,
         const int64_t stride_channel_x, const int64_t stride_channel_y, const int64_t stride_channel_dst, const int64_t nsamples_x,
         const int64_t nsamples_dst, const int64_t stride_sample_x, const int64_t stride_sample_y, const int64_t stride_sample_dst,
-        enum ggml_prec prec, cudaStream_t stream);
-
-// Specialization for float - always use float accumulation
-template<>
-void mul_mat_vec_cuda<float>(
-        const float * x, const float * y, const int32_t * ids, float * dst,
-        const int64_t ncols, const int64_t nrows, const int64_t ncols_dst,
-        const int64_t stride_row, const int64_t stride_col_y, const int stride_col_dst,
-        const int64_t nchannels_x, const int64_t nchannels_y, const int64_t nchannels_dst,
-        const int64_t stride_channel_x, const int64_t stride_channel_y, const int64_t stride_channel_dst, const int64_t nsamples_x,
-        const int64_t nsamples_dst, const int64_t stride_sample_x, const int64_t stride_sample_y, const int64_t stride_sample_dst,
         enum ggml_prec prec, cudaStream_t stream) {
-    mul_mat_vec_cuda_switch_ncols_dst<float, float>
-        (x, y, ids, dst, ncols, nrows, ncols_dst, stride_row, stride_col_y, stride_col_dst,
-         nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y,
-         stride_channel_dst, nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, stream);
-}
-
-// Specialization for half - always use float accumulation on older GPUs
-template<>
-void mul_mat_vec_cuda<half>(
-        const half * x, const float * y, const int32_t * ids, float * dst,
-        const int64_t ncols, const int64_t nrows, const int64_t ncols_dst,
-        const int64_t stride_row, const int64_t stride_col_y, const int stride_col_dst,
-        const int64_t nchannels_x, const int64_t nchannels_y, const int64_t nchannels_dst,
-        const int64_t stride_channel_x, const int64_t stride_channel_y, const int64_t stride_channel_dst, const int64_t nsamples_x,
-        const int64_t nsamples_dst, const int64_t stride_sample_x, const int64_t stride_sample_y, const int64_t stride_sample_dst,
-        enum ggml_prec prec, cudaStream_t stream) {
-    // Always use float accumulation since Jetson Nano doesn't support FP16 compute
-    mul_mat_vec_cuda_switch_ncols_dst<half, float>
+    if constexpr(std::is_same<T, half>::value) {
+        if (prec == GGML_PREC_DEFAULT) {
+            mul_mat_vec_cuda_switch_ncols_dst<T, half>
+                (x, y, ids, dst, ncols, nrows, ncols_dst, stride_row, stride_col_y, stride_col_dst,
+                 nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y,
+                 stride_channel_dst, nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, stream);
+            return;
+        }
+    }
+    mul_mat_vec_cuda_switch_ncols_dst<T, float>
         (x, y, ids, dst, ncols, nrows, ncols_dst, stride_row, stride_col_y, stride_col_dst,
          nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y,
          stride_channel_dst, nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, stream);
@@ -368,7 +366,7 @@ void ggml_cuda_mul_mat_vec(ggml_backend_cuda_context & ctx, const ggml_tensor * 
                 ne03,              ne3,           s03, s13,              s3,                 prec, ctx.stream());
         } break;
         case GGML_TYPE_BF16: {
-            const half * src0_d = (const half *) src0->data;
+            const nv_bfloat16 * src0_d = (const nv_bfloat16 *) src0->data;
             mul_mat_vec_cuda(src0_d, src1_d, ids_d, dst_d, ne00, ne01, ncols_dst, s01, s11, s1,
                 ne02, nchannels_y, nchannels_dst, s02, stride_channel_y, stride_channel_dst,
                 ne03,              ne3,           s03, s13,              s3,                 prec, ctx.stream());
@@ -427,7 +425,7 @@ void ggml_cuda_op_mul_mat_vec(
                 nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, prec, stream);
         } break;
         case GGML_TYPE_BF16: {
-            const half * src0_d = (const half *) src0_dd_i;
+            const nv_bfloat16 * src0_d = (const nv_bfloat16 *) src0_dd_i;
             mul_mat_vec_cuda(src0_d, src1_ddf_i, nullptr, dst_dd_i, ne00, row_diff, src1_ncols, stride_row, stride_col_y, stride_col_dst,
                 nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y, stride_channel_dst,
                 nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, prec, stream);
