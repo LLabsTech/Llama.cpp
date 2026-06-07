@@ -3,7 +3,11 @@
 #include <cuda_runtime.h>
 #include <cuda.h>
 #include <cublas_v2.h>
-// #include <cuda_bf16.h>
+#if CUDART_VERSION >= 11000
+#include <cuda_bf16.h>
+#else
+#include "bf16-compat.cuh" // Jetson / CUDA 10.2: cuda_bf16.h is unavailable, emulate bf16
+#endif // CUDART_VERSION >= 11000
 #include <cuda_fp16.h>
 
 #ifndef __builtin_assume

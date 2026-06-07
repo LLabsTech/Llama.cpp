@@ -131,8 +131,10 @@ if (CUDAToolkit_FOUND)
 
     add_compile_definitions(GGML_CUDA_PEER_MAX_BATCH_SIZE=${GGML_CUDA_PEER_MAX_BATCH_SIZE})
 
-    if (GGML_CUDA_GRAPHS)
+    if (GGML_CUDA_GRAPHS AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "11.0")
         add_compile_definitions(GGML_CUDA_USE_GRAPHS)
+    elseif (GGML_CUDA_GRAPHS)
+        message(STATUS "ggml-cuda: CUDA toolkit ${CMAKE_CUDA_COMPILER_VERSION} < 11.0, disabling CUDA graphs")
     endif()
 
     if (GGML_CUDA_FORCE_MMQ)

@@ -1649,8 +1649,10 @@ static void ggml_cuda_op_mul_mat_cublas(
 
     const int cc = ggml_cuda_info().devices[id].cc;
 
+#if CUDART_VERSION >= 11000
     const bool supports_bf16 = GGML_CUDA_CC_IS_NVIDIA(cc) || GGML_CUDA_CC_IS_AMD(cc) ||
         (GGML_CUDA_CC_IS_MTHREADS(cc) && cc >= GGML_CUDA_CC_QY2);
+#endif // CUDART_VERSION >= 11000
 
     const bool use_fp16 =
         src0->type != GGML_TYPE_NVFP4 &&
@@ -1659,8 +1661,10 @@ static void ggml_cuda_op_mul_mat_cublas(
         row_diff == src0->ne[1] &&
         dst->op_params[0] == GGML_PREC_DEFAULT;
 
+#if CUDART_VERSION >= 11000
+    // cuBLAS bf16 GEMM requires CUDA >= 11; on CUDA 10.2 bf16 falls through to the fp32 path below.
     if (supports_bf16 && src0->type == GGML_TYPE_BF16 && ggml_is_contiguous(src0) && row_diff == src0->ne[1]) {
-        ggml_cuda_pool_alloc<half> src1_as_bf16(ctx.pool(id));
+        ggml_cuda_pool_alloc<nv_bfloat16> src1_as_bf16(ctx.pool(id));
         if (src1->type != GGML_TYPE_BF16) {
             const to_bf16_cuda_t to_bf16_cuda = ggml_get_to_bf16_cuda(src1->type);
             GGML_ASSERT(to_bf16_cuda != nullptr);
@@ -1668,9 +1672,9 @@ static void ggml_cuda_op_mul_mat_cublas(
             src1_as_bf16.alloc(ne);
             to_bf16_cuda(src1_ddf_i, src1_as_bf16.get(), ne, stream);
         }
-        const half * src1_ptr = src1->type == GGML_TYPE_BF16 ? (const half *) src1_ddf_i : src1_as_bf16.get();
-        const half * src0_ptr = (const half *)src0_dd_i;
-        ggml_cuda_pool_alloc<half> dst_bf16(ctx.pool(id), row_diff*src1_ncols);
+        const nv_bfloat16 * src1_ptr = src1->type == GGML_TYPE_BF16 ? (const nv_bfloat16 *) src1_ddf_i : src1_as_bf16.get();
+        const nv_bfloat16 * src0_ptr = (const nv_bfloat16 *)src0_dd_i;
+        ggml_cuda_pool_alloc<nv_bfloat16> dst_bf16(ctx.pool(id), row_diff*src1_ncols);
 
         const float alpha_f32 = 1.0f;
         const float beta_f32  = 0.0f;
@@ -1679,15 +1683,17 @@ static void ggml_cuda_op_mul_mat_cublas(
         CUBLAS_CHECK(
             cublasGemmEx(ctx.cublas_handle(id), CUBLAS_OP_T, CUBLAS_OP_N,
                     row_diff, src1_ncols, ne10,
-                    &alpha_f32,  src0_ptr,       CUDA_R_16F, ne00,
-                                 src1_ptr,       CUDA_R_16F, ne10,
-                    &beta_f32,   dst_bf16.get(), CUDA_R_16F, ldc,
+                    &alpha_f32,  src0_ptr,       CUDA_R_16BF, ne00,
+                                 src1_ptr,       CUDA_R_16BF, ne10,
+                    &beta_f32,   dst_bf16.get(), CUDA_R_16BF, ldc,
                     CUBLAS_COMPUTE_32F,
                     CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 
         const to_fp32_cuda_t to_fp32_cuda = ggml_get_to_fp32_cuda(GGML_TYPE_BF16);
         to_fp32_cuda(dst_bf16.get(), dst_dd_i, row_diff*src1_ncols, stream);
-    } else if (fast_fp16_hardware_available(cc) && use_fp16) {
+    } else
+#endif // CUDART_VERSION >= 11000
+    if (fast_fp16_hardware_available(cc) && use_fp16) {
         // convert src0 and src1 to fp16, multiply as fp16, convert dst to fp32
         ggml_cuda_pool_alloc<half> src0_as_f16(ctx.pool(id));
         if (src0->type != GGML_TYPE_F16) {
@@ -2162,6 +2168,7 @@ struct batched_mul_mat_traits<GGML_TYPE_F32> {
     static inline auto get_nc_converter(ggml_type src_type) { return ggml_get_to_fp32_nc_cuda(src_type); }
 };
 
+#if CUDART_VERSION >= 11000 // cuBLAS bf16 GEMM (CUDA_R_16BF) requires CUDA >= 11
 template<>
 struct batched_mul_mat_traits<GGML_TYPE_BF16> {
     using cuda_type = nv_bfloat16;
@@ -2174,6 +2181,7 @@ struct batched_mul_mat_traits<GGML_TYPE_BF16> {
     static inline const void* get_beta() { static const float val = beta; return &val; }
     static inline auto get_nc_converter(ggml_type src_type) { return ggml_get_to_bf16_nc_cuda(src_type); }
 };
+#endif // CUDART_VERSION >= 11000
 
 template<>
 struct batched_mul_mat_traits<GGML_TYPE_F16> {
@@ -2368,9 +2376,11 @@ static void ggml_cuda_mul_mat_batched_cublas(ggml_backend_cuda_context & ctx, co
         case GGML_TYPE_F32:
             ggml_cuda_mul_mat_batched_cublas_impl<GGML_TYPE_F32>(ctx, src0, src1, dst);
             break;
+#if CUDART_VERSION >= 11000 // bf16 batched cuBLAS requires CUDA >= 11; on CUDA 10.2 bf16 is never routed here (bf16_mma_hardware_available() is false on sm_53)
         case GGML_TYPE_BF16:
             ggml_cuda_mul_mat_batched_cublas_impl<GGML_TYPE_BF16>(ctx, src0, src1, dst);
             break;
+#endif // CUDART_VERSION >= 11000
         case GGML_TYPE_F16:
             ggml_cuda_mul_mat_batched_cublas_impl<GGML_TYPE_F16>(ctx, src0, src1, dst);
             break;

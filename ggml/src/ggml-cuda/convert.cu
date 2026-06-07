@@ -761,7 +761,7 @@ to_fp16_cuda_t ggml_get_to_fp16_cuda(ggml_type type) {
         case GGML_TYPE_F32:
             return convert_unary_cont_cuda<float>;
         case GGML_TYPE_BF16:
-            return convert_unary_cont_cuda<half>;
+            return convert_unary_cont_cuda<nv_bfloat16>;
         default:
             return nullptr;
     }
@@ -816,7 +816,7 @@ to_fp32_cuda_t ggml_get_to_fp32_cuda(ggml_type type) {
         case GGML_TYPE_F16:
             return convert_unary_cont_cuda<half>;
         case GGML_TYPE_BF16:
-            return convert_unary_cont_cuda<half>;
+            return convert_unary_cont_cuda<nv_bfloat16>;
         default:
             return nullptr;
     }
@@ -839,7 +839,7 @@ to_fp16_nc_cuda_t ggml_get_to_fp16_nc_cuda(ggml_type type) {
         case GGML_TYPE_Q8_0:
             return dequantize_block_cuda<QK8_0, QR8_0, dequantize_q8_0>;
         case GGML_TYPE_BF16:
-            return convert_unary_cuda<half>;
+            return convert_unary_cuda<nv_bfloat16>;
         default:
             return nullptr;
     }

@@ -6,7 +6,9 @@
 #include <hip/hip_cooperative_groups.h>
 #else
 #include <cooperative_groups.h>
-#include <cooperative_groups/reduce.h>
+#if CUDART_VERSION >= 11000
+#include <cooperative_groups/reduce.h> // cg::reduce header added in CUDA 11; not used on the sm_53 (Maxwell) code path
+#endif // CUDART_VERSION >= 11000
 #endif // GGML_USE_HIP
 
 #include <cstdint>
