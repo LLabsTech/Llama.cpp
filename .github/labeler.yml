@@ -1,10 +1,4 @@
 # https://github.com/actions/labeler
-Kompute:
-    - changed-files:
-        - any-glob-to-any-file:
-            - ggml/include/ggml-kompute.h
-            - ggml/src/ggml-kompute/**
-            - README-kompute.md
 Apple Metal:
     - changed-files:
         - any-glob-to-any-file:
@@ -28,6 +22,16 @@ Vulkan:
         - any-glob-to-any-file:
             - ggml/include/ggml-vulkan.h
             - ggml/src/ggml-vulkan/**
+IBM zDNN:
+    - changed-files:
+        - any-glob-to-any-file:
+            - ggml/include/ggml-zdnn.h
+            - ggml/src/ggml-zdnn/**
+AMD ZenDNN:
+    - changed-files:
+        - any-glob-to-any-file:
+            - ggml/include/ggml-zendnn.h
+            - ggml/src/ggml-zendnn/**
 documentation:
     - changed-files:
         - any-glob-to-any-file:
@@ -69,14 +73,25 @@ android:
     - changed-files:
         - any-glob-to-any-file:
             - examples/llama.android/**
+server/ui:
+    - changed-files:
+        - any-glob-to-any-file:
+            - tools/ui/**
 server:
     - changed-files:
         - any-glob-to-any-file:
             - tools/server/**
+
+
+
 ggml:
     - changed-files:
         - any-glob-to-any-file:
             - ggml/**
+model:
+    - changed-files:
+        - any-glob-to-any-file:
+            - src/models/**
 nix:
     - changed-files:
         - any-glob-to-any-file:
@@ -86,3 +101,35 @@ nix:
 embedding:
     - changed-files:
         - any-glob-to-any-file: examples/embedding/
+jinja parser:
+    - changed-files:
+        - any-glob-to-any-file:
+            - common/jinja/**
+Ascend NPU:
+    - changed-files:
+        - any-glob-to-any-file:
+            - ggml/include/ggml-cann.h
+            - ggml/src/ggml-cann/**
+            - docs/backend/CANN.md
+OpenCL:
+    - changed-files:
+        - any-glob-to-any-file:
+            - ggml/include/ggml-opencl.h
+            - ggml/src/ggml-opencl/**
+            - docs/backend/OPENCL.md
+Hexagon:
+    - changed-files:
+        - any-glob-to-any-file:
+            - ggml/include/ggml-hexagon.h
+            - ggml/src/ggml-hexagon/**
+WebGPU:
+    - changed-files:
+        - any-glob-to-any-file:
+            - ggml/include/ggml-webgpu.h
+            - ggml/src/ggml-webgpu/**
+OpenVINO:
+    - changed-files:
+        - any-glob-to-any-file:
+            - ggml/include/ggml-openvino.h
+            - ggml/src/ggml-openvino/**
+            - docs/backend/OPENVINO.md

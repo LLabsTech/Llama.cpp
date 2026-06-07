@@ -1,4 +1,5 @@
 #include "arg.h"
+#include "debug.h"
 #include "log.h"
 #include "common.h"
 #include "sampling.h"
@@ -7,10 +8,12 @@
 #include "console.h"
 #include "chat.h"
 #include "mtmd.h"
+#include "mtmd-helper.h"
 
 #include <vector>
 #include <limits.h>
 #include <cinttypes>
+#include <clocale>
 
 #if defined (__unix__) || (defined (__APPLE__) && defined (__MACH__))
 #include <signal.h>
@@ -37,10 +40,10 @@ static volatile bool g_is_interrupted = false;
 static void show_additional_info(int /*argc*/, char ** argv) {
     LOG(
         "Experimental CLI for multimodal\n\n"
-        "Usage: %s [options] -m <model> --mmproj <mmproj> --image <image> -p <prompt>\n\n"
+        "Usage: %s [options] -m <model> --mmproj <mmproj> --image <image> --audio <audio> -p <prompt>\n\n"
         "  -m and --mmproj are required\n"
         "  -hf user/repo can replace both -m and --mmproj in most cases\n"
-        "  --image and -p are optional, if NOT provided, the CLI will run in chat mode\n"
+        "  --image, --audio and -p are optional, if NOT provided, the CLI will run in chat mode\n"
         "  to disable using GPU for mmproj model, add --no-mmproj-offload\n",
         argv[0]
     );
@@ -64,19 +67,22 @@ static void sigint_handler(int signo) {
 
 struct mtmd_cli_context {
     mtmd::context_ptr ctx_vision;
-    common_init_result llama_init;
+    common_init_result_ptr llama_init;
 
     llama_model       * model;
     llama_context     * lctx;
     const llama_vocab * vocab;
+    common_sampler    * smpl;
     llama_batch         batch;
     int                 n_batch;
 
     mtmd::bitmaps bitmaps;
 
-    // note: we know that gemma3 template is "linear", meaning each turn is completely separated to another
-    // so here we don't need to keep track of chat history
+    // chat template
     common_chat_templates_ptr tmpls;
+    std::vector<common_chat_msg> chat_history;
+    bool use_jinja = false;
+    // TODO: support for --system-prompt with /clear command
 
     // support for legacy templates (models not having EOT token)
     llama_tokens antiprompt_tokens;
@@ -84,12 +90,15 @@ struct mtmd_cli_context {
     int n_threads    = 1;
     llama_pos n_past = 0;
 
+    common_debug_cb_user_data cb_data;
+
     mtmd_cli_context(common_params & params) : llama_init(common_init_from_params(params)) {
-        model = llama_init.model.get();
-        lctx = llama_init.context.get();
+        model = llama_init->model();
+        lctx = llama_init->context();
         vocab = llama_model_get_vocab(model);
+        smpl = common_sampler_init(model, params.sampling);
         n_threads = params.cpuparams.n_threads;
-        batch = llama_batch_init(params.n_batch, 0, 1);
+        batch = llama_batch_init(1, 0, 1); // batch for next token generation
         n_batch = params.n_batch;
 
         if (!model || !lctx) {
@@ -105,7 +114,9 @@ struct mtmd_cli_context {
         }
 
         tmpls = common_chat_templates_init(model, params.chat_template);
-        LOG_INF("%s: chat template example:\n%s\n", __func__, common_chat_format_example(tmpls.get(), params.use_jinja).c_str());
+        use_jinja = params.use_jinja;
+        chat_history.clear();
+        LOG_INF("%s: chat template example:\n%s\n", __func__, common_chat_format_example(tmpls.get(), params.use_jinja, params.default_template_kwargs).c_str());
 
         init_vision_context(params);
 
@@ -117,13 +128,25 @@ struct mtmd_cli_context {
         }
     }
 
+    ~mtmd_cli_context() {
+        llama_batch_free(batch);
+        common_sampler_free(smpl);
+    }
+
     void init_vision_context(common_params & params) {
         const char * clip_path = params.mmproj.path.c_str();
         mtmd_context_params mparams = mtmd_context_params_default();
-        mparams.use_gpu = params.mmproj_use_gpu;
-        mparams.print_timings = true;
-        mparams.n_threads = params.cpuparams.n_threads;
-        mparams.verbosity = params.verbosity > 0 ? GGML_LOG_LEVEL_DEBUG : GGML_LOG_LEVEL_INFO;
+        mparams.use_gpu          = params.mmproj_use_gpu;
+        mparams.print_timings    = true;
+        mparams.n_threads        = params.cpuparams.n_threads;
+        mparams.flash_attn_type  = params.flash_attn_type;
+        mparams.warmup           = params.warmup;
+        mparams.image_min_tokens = params.image_min_tokens;
+        mparams.image_max_tokens = params.image_max_tokens;
+        if (std::getenv("MTMD_DEBUG_GRAPH") != nullptr) {
+            mparams.cb_eval_user_data = &cb_data;
+            mparams.cb_eval = common_debug_cb_eval;
+        }
         ctx_vision.reset(mtmd_init_from_file(clip_path, model, mparams));
         if (!ctx_vision.get()) {
             LOG_ERR("Failed to load vision model from %s\n", clip_path);
@@ -142,8 +165,8 @@ struct mtmd_cli_context {
         );
     }
 
-    bool load_image(const std::string & fname) {
-        mtmd::bitmap bmp(mtmd_helper_bitmap_init_from_file(fname.c_str()));
+    bool load_media(const std::string & fname) {
+        mtmd::bitmap bmp(mtmd_helper_bitmap_init_from_file(ctx_vision.get(), fname.c_str(), false));
         if (!bmp.ptr) {
             return false;
         }
@@ -152,7 +175,7 @@ struct mtmd_cli_context {
     }
 };
 
-static int generate_response(mtmd_cli_context & ctx, common_sampler * smpl, int n_predict) {
+static int generate_response(mtmd_cli_context & ctx, int n_predict) {
     llama_tokens generated_tokens;
     for (int i = 0; i < n_predict; i++) {
         if (i > n_predict || !g_is_generating || g_is_interrupted) {
@@ -160,9 +183,9 @@ static int generate_response(mtmd_cli_context & ctx, common_sampler * smpl, int 
             break;
         }
 
-        llama_token token_id = common_sampler_sample(smpl, ctx.lctx, -1);
+        llama_token token_id = common_sampler_sample(ctx.smpl, ctx.lctx, -1);
         generated_tokens.push_back(token_id);
-        common_sampler_accept(smpl, token_id, true);
+        common_sampler_accept(ctx.smpl, token_id, true);
 
         if (llama_vocab_is_eog(ctx.vocab, token_id) || ctx.check_antiprompt(generated_tokens)) {
             LOG("\n");
@@ -185,19 +208,33 @@ static int generate_response(mtmd_cli_context & ctx, common_sampler * smpl, int 
             return 1;
         }
     }
+
+    std::string generated_text = common_detokenize(ctx.lctx, generated_tokens);
+    common_chat_msg msg;
+    msg.role    = "assistant";
+    msg.content = generated_text;
+    ctx.chat_history.push_back(std::move(msg));
+
     return 0;
 }
 
-static int eval_message(mtmd_cli_context & ctx, common_chat_msg & msg, bool add_bos = false) {
-    common_chat_templates_inputs tmpl_inputs;
-    tmpl_inputs.messages = {msg};
-    tmpl_inputs.add_generation_prompt = true;
-    tmpl_inputs.use_jinja = false; // jinja is buggy here
-    auto formatted_chat = common_chat_templates_apply(ctx.tmpls.get(), tmpl_inputs);
-    LOG_DBG("formatted_chat.prompt: %s\n", formatted_chat.prompt.c_str());
+static std::string chat_add_and_format(mtmd_cli_context & ctx, common_chat_msg & new_msg) {
+    LOG_DBG("chat_add_and_format: new_msg.role='%s', new_msg.content='%s'\n",
+        new_msg.role.c_str(), new_msg.content.c_str());
+    auto formatted = common_chat_format_single(ctx.tmpls.get(), ctx.chat_history,
+        new_msg, new_msg.role == "user",
+        ctx.use_jinja);
+    ctx.chat_history.push_back(new_msg);
+    return formatted;
+}
+
+static int eval_message(mtmd_cli_context & ctx, common_chat_msg & msg) {
+    bool add_bos = ctx.chat_history.empty();
+    auto formatted_chat = chat_add_and_format(ctx, msg);
+    LOG_DBG("formatted_chat.prompt: %s\n", formatted_chat.c_str());
 
     mtmd_input_text text;
-    text.text          = formatted_chat.prompt.c_str();
+    text.text          = formatted_chat.c_str();
     text.add_special   = add_bos;
     text.parse_special = true;
 
@@ -238,16 +275,19 @@ static int eval_message(mtmd_cli_context & ctx, common_chat_msg & msg, bool add_
 }
 
 int main(int argc, char ** argv) {
+    std::setlocale(LC_NUMERIC, "C");
+
     ggml_time_init();
 
     common_params params;
-    params.sampling.temp = 0.2; // lower temp by default for better quality
 
-    if (!common_params_parse(argc, argv, params, LLAMA_EXAMPLE_LLAVA, show_additional_info)) {
+    common_init();
+
+    if (!common_params_parse(argc, argv, params, LLAMA_EXAMPLE_MTMD, show_additional_info)) {
         return 1;
     }
 
-    common_init();
+    mtmd_helper_log_set(common_log_default_callback, nullptr);
 
     if (params.mmproj.path.empty()) {
         show_additional_info(argc, argv);
@@ -255,12 +295,13 @@ int main(int argc, char ** argv) {
         return 1;
     }
 
+    ggml_backend_load_all();
+
     mtmd_cli_context ctx(params);
-    LOG("%s: loading model: %s\n", __func__, params.model.path.c_str());
+    LOG_INF("%s: loading model: %s\n", __func__, params.model.path.c_str());
 
     bool is_single_turn = !params.prompt.empty() && !params.image.empty();
 
-    struct common_sampler * smpl = common_sampler_init(ctx.model, params.sampling);
     int n_predict = params.n_predict < 0 ? INT_MAX : params.n_predict;
 
     // Ctrl+C handling
@@ -281,44 +322,71 @@ int main(int argc, char ** argv) {
 
     if (g_is_interrupted) return 130;
 
+    auto eval_system_prompt_if_present = [&] {
+        if (params.system_prompt.empty()) {
+            return 0;
+        }
+
+        common_chat_msg msg;
+        msg.role = "system";
+        msg.content = params.system_prompt;
+        return eval_message(ctx, msg);
+    };
+
+    LOG_WRN("WARN: This is an experimental CLI for testing multimodal capability.\n");
+    LOG_WRN("      For normal use cases, please use the standard llama-cli\n");
+
+    if (eval_system_prompt_if_present()) {
+        return 1;
+    }
+
     if (is_single_turn) {
         g_is_generating = true;
-        if (params.prompt.find("<__image__>") == std::string::npos) {
-            params.prompt += " <__image__>";
+        if (params.prompt.find(mtmd_default_marker()) == std::string::npos) {
+            for (size_t i = 0; i < params.image.size(); i++) {
+                // most models require the marker before each image
+                // ref: https://github.com/ggml-org/llama.cpp/pull/17616
+                params.prompt = mtmd_default_marker() + params.prompt;
+            }
         }
+
         common_chat_msg msg;
         msg.role = "user";
         msg.content = params.prompt;
         for (const auto & image : params.image) {
-            if (!ctx.load_image(image)) {
+            if (!ctx.load_media(image)) {
                 return 1; // error is already printed by libmtmd
             }
         }
-        if (eval_message(ctx, msg, true)) {
+        if (eval_message(ctx, msg)) {
             return 1;
         }
-        if (!g_is_interrupted && generate_response(ctx, smpl, n_predict)) {
+        if (!g_is_interrupted && generate_response(ctx, n_predict)) {
             return 1;
         }
 
     } else {
         LOG("\n Running in chat mode, available commands:");
-        LOG("\n   /image <path>    load an image");
+        if (mtmd_support_vision(ctx.ctx_vision.get())) {
+            LOG("\n   /image <path>    load an image");
+        }
+        if (mtmd_support_audio(ctx.ctx_vision.get())) {
+            LOG("\n   /audio <path>    load an audio");
+        }
         LOG("\n   /clear           clear the chat history");
         LOG("\n   /quit or /exit   exit the program");
         LOG("\n");
 
-        bool is_first_msg = true;
         std::string content;
 
         while (!g_is_interrupted) {
             g_is_generating = false;
             LOG("\n> ");
-            console::set_display(console::user_input);
+            console::set_display(DISPLAY_TYPE_USER_INPUT);
             std::string line;
             console::readline(line, false);
             if (g_is_interrupted) break;
-            console::set_display(console::reset);
+            console::set_display(DISPLAY_TYPE_RESET);
             line = string_strip(line);
             if (line.empty()) {
                 continue;
@@ -328,20 +396,26 @@ int main(int argc, char ** argv) {
             }
             if (line == "/clear") {
                 ctx.n_past = 0;
-                llama_kv_self_seq_rm(ctx.lctx, 0, 1, -1); // keep BOS
+                ctx.chat_history.clear();
+                llama_memory_clear(llama_get_memory(ctx.lctx), true);
+                if (eval_system_prompt_if_present()) {
+                    return 1;
+                }
                 LOG("Chat history cleared\n\n");
                 continue;
             }
             g_is_generating = true;
-            if (line == "/image" || line.find("/image ") == 0) {
+            bool is_image = line == "/image" || line.find("/image ") == 0;
+            bool is_audio = line == "/audio" || line.find("/audio ") == 0;
+            if (is_image || is_audio) {
                 if (line.size() < 8) {
-                    LOG_ERR("ERR: Missing image filename\n");
+                    LOG_ERR("ERR: Missing media filename\n");
                     continue;
                 }
-                std::string image = line.substr(7);
-                if (ctx.load_image(image)) {
-                    LOG("Image %s loaded\n", image.c_str());
-                    content += "<__image__>";
+                std::string media_path = line.substr(7);
+                if (ctx.load_media(media_path)) {
+                    LOG("%s %s loaded\n", media_path.c_str(), is_image ? "image" : "audio");
+                    content += mtmd_default_marker();
                 }
                 // else, error is already printed by libmtmd
                 continue;
@@ -351,16 +425,15 @@ int main(int argc, char ** argv) {
             common_chat_msg msg;
             msg.role = "user";
             msg.content = content;
-            int ret = eval_message(ctx, msg, is_first_msg);
+            int ret = eval_message(ctx, msg);
             if (ret) {
                 return 1;
             }
             if (g_is_interrupted) break;
-            if (generate_response(ctx, smpl, n_predict)) {
+            if (generate_response(ctx, n_predict)) {
                 return 1;
             }
             content.clear();
-            is_first_msg = false;
         }
     }
     if (g_is_interrupted) LOG("\nInterrupted by user\n");
